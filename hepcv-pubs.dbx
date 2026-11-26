@@ -1,0 +1,4 @@
+% Data model extension for hepcv-pubs.sty (custom CV fields)
+\DeclareDatamodelFields[type=field,datatype=literal]{collaboration,role,inspire,citations}
+\DeclareDatamodelFields[type=field,datatype=integer]{nauthors}
+\DeclareDatamodelEntryfields{collaboration,role,inspire,nauthors,citations}

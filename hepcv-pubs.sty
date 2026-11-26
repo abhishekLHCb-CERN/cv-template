@@ -1,0 +1,329 @@
+% hepcv-pubs.sty : publications engine for hepcv (biblatex + biber, CTAN only)
+% MIT licence. Placeholder-friendly: no personal data.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{hepcv-pubs}[2026/11/25 v0.1 hepcv publications engine]
+\RequirePackage{keyval}
+\RequirePackage{etoolbox}
+\RequirePackage{xcolor}
+\RequirePackage{csquotes}
+% maxbibnames is very large on purpose: biber must never truncate a list,
+% because truncation is done in the name format below so that the highlighted
+% self author is never hidden (see \cvmyname and the maxauthors key).
+\RequirePackage[backend=biber,style=numeric,datamodel=hepcv-pubs,sorting=ydnt,maxbibnames=99999,minbibnames=99999,
+  maxcitenames=3,mincitenames=3,giveninits=true,uniquename=false,uniquelist=false,
+  doi=true,url=false,isbn=false,eprint=true,language=english,
+  defernumbers=false]{biblatex}
+
+%% ---- options / setup -----------------------------------------------------
+\newcommand*\cv@me{}\newcommand*\cv@medisp{}
+\newcommand*\cv@mefamraw{}\newcommand*\cv@megivenraw{}
+\def\cv@splitme#1,#2\@nil{\def\cv@mefamraw{#1}\def\cv@megivenraw{#2}}
+% \cvmyname[<id, reserved>]{Family, Given}{Display}
+%   Given: initials ("A." or "A. B.") or a full given name ("Alex").
+%   Prefixes are part of the family: \cvmyname{von Neumann, J.}{J. von Neumann}.
+\newcommand*\cvmyname{\@ifnextchar[\cv@myname@o{\cv@myname@o[]}}
+\def\cv@myname@o[#1]#2#3{%
+  \in@{,}{#2}%
+  \ifin@\else
+    \PackageError{hepcv-pubs}{\string\cvmyname\space needs "Family, Given" (a comma), got "#2"}%
+      {Write e.g. \string\cvmyname{Example, Alex}{A. Example}.}%
+  \fi
+  \def\cv@me{#2}\def\cv@medisp{#3}%
+  \cv@splitme#2,\@nil}
+\newcommand*\cvpubsource[1]{\addbibresource{#1}}
+\newcommand*\cvpubsetup[1]{\setkeys{cvpubs}{#1}}
+\def\cv@showrole{true}
+\def\cv@numbered{false}
+\def\cv@limit{0}
+\def\cv@sorting{ydnt}
+\def\cv@tier{all}
+\define@key{cvpubs}{tier}{\def\cv@tier{#1}}
+\define@key{cvpubs}{limit}{\def\cv@limit{#1}}
+\define@key{cvpubs}{showrole}[true]{\def\cv@showrole{#1}}
+\define@key{cvpubs}{number}[true]{\def\cv@numbered{#1}}
+\def\cv@maxa{6}% 0 = never truncate
+\define@key{cvpubs}{maxauthors}{\def\cv@maxa{#1}}
+\define@key{cvpubs}{sort}{%
+  \ifstrequal{#1}{year-desc}{\def\cv@sorting{ydnt}}{%
+  \ifstrequal{#1}{year-asc}{\def\cv@sorting{ynt}}{\def\cv@sorting{#1}}}}
+\define@key{cvpubs}{kind}{\def\cv@kind{#1}}
+\def\cv@kind{all}
+
+%% ---- self matching ---------------------------------------------------------
+% Family (with prefix) equal, case-folded; initials of one name are a prefix of
+% the other's; if both sides spell the first given name it must agree.
+% Limitation: with initials only, every "A. Example" matches. Give the full
+% given name to exclude a different person who is spelt out in the bib; a bib
+% entry that only has an initial cannot be told apart. Non-ASCII names should
+% be typed identically in \cvmyname and the bib file.
+\newif\ifcv@metrue@
+\ExplSyntaxOn
+\bool_new:N \g__cv_match_bool
+\tl_new:N \l__cv_ini_b_tl \tl_new:N \l__cv_full_b_tl
+\tl_new:N \l__cv_ini_m_tl \tl_new:N \l__cv_full_m_tl
+\tl_new:N \l__cv_fam_b_tl \tl_new:N \l__cv_fam_m_tl
+\cs_new_protected:Npn \__cv_clean_given:nNN #1#2#3
+  {
+    \tl_set:Nx \l_tmpa_tl {#1}
+    \tl_set:Nx \l_tmpa_tl { \tl_to_str:N \l_tmpa_tl }
+    \regex_replace_all:nnN { [\x{7E}\.\-] } { \ } \l_tmpa_tl
+    \regex_replace_all:nnN { [^A-Za-z\ ] } { } \l_tmpa_tl
+    \seq_set_split:NnV \l_tmpa_seq { ~ } \l_tmpa_tl
+    \tl_clear:N #2 \tl_clear:N #3
+    \seq_map_inline:Nn \l_tmpa_seq
+      {
+        \tl_if_empty:nF {##1}
+          {
+            \regex_match:nnTF { [a-z] } {##1}
+              {
+                \tl_put_right:Nx #2 { \str_range:nnn {##1} {1} {1} }
+                \tl_if_empty:NT #3 { \tl_set:Nn #3 {##1} }
+              }
+              { \tl_put_right:Nn #2 {##1} }
+          }
+      }
+    \tl_set:Nx #2 { \str_fold_case:V #2 }
+    \tl_set:Nx #3 { \str_fold_case:V #3 }
+  }
+\cs_new_protected:Npn \__cv_clean_fam:nN #1#2
+  {
+    \tl_set:Nx #2 {#1}
+    \tl_set:Nx #2 { \tl_to_str:N #2 }
+    \regex_replace_all:nnN { [\x{7E}\ ] } { } #2
+    \tl_set:Nx #2 { \str_fold_case:V #2 }
+  }
+\cs_new_protected:Npn \cv@ismeexp #1#2#3
+  {
+    \bool_gset_false:N \g__cv_match_bool
+    \tl_if_empty:NF \cv@mefamraw
+      {
+        \group_begin:
+          \cs_set_nopar:Npn \bibinitperiod { }
+          \cs_set_nopar:Npn \bibinitdelim { ~ }
+          \cs_set_nopar:Npn \bibinithyphendelim { ~ }
+          \cs_set_nopar:Npn \bibnamedelima { ~ }
+          \cs_set_nopar:Npn \bibnamedelimb { ~ }
+          \cs_set_nopar:Npn \bibnamedelimc { ~ }
+          \cs_set_nopar:Npn \bibnamedelimd { ~ }
+          \cs_set_nopar:Npn \bibnamedelimi { ~ }
+          \cs_set_nopar:Npn \addnbspace { ~ }
+          \__cv_clean_fam:nN { #1 #2 } \l__cv_fam_b_tl
+          \__cv_clean_fam:nN { \cv@mefamraw } \l__cv_fam_m_tl
+          \str_if_eq:eeT { \l__cv_fam_b_tl } { \l__cv_fam_m_tl }
+            {
+              \__cv_clean_given:nNN {#3} \l__cv_ini_b_tl \l__cv_full_b_tl
+              \__cv_clean_given:nNN { \cv@megivenraw } \l__cv_ini_m_tl \l__cv_full_m_tl
+              \int_set:Nn \l_tmpa_int
+                { \int_min:nn { \tl_count:N \l__cv_ini_b_tl } { \tl_count:N \l__cv_ini_m_tl } }
+              \bool_if:nT
+                {
+                  (
+                    \tl_if_empty_p:N \l__cv_ini_b_tl && \tl_if_empty_p:N \l__cv_ini_m_tl
+                  )
+                  ||
+                  (
+                    \int_compare_p:nNn { \l_tmpa_int } > { 0 }
+                    &&
+                    \str_if_eq_p:ee
+                      { \tl_range:Nnn \l__cv_ini_b_tl { 1 } { \l_tmpa_int } }
+                      { \tl_range:Nnn \l__cv_ini_m_tl { 1 } { \l_tmpa_int } }
+                  )
+                }
+                {
+                  \bool_if:nT
+                    {
+                      \tl_if_empty_p:N \l__cv_full_b_tl
+                      || \tl_if_empty_p:N \l__cv_full_m_tl
+                      || \str_if_eq_p:ee { \l__cv_full_b_tl } { \l__cv_full_m_tl }
+                    }
+                    { \bool_gset_true:N \g__cv_match_bool }
+                }
+            }
+        \group_end:
+      }
+    \bool_if:NTF \g__cv_match_bool { \global\cv@metrue@true } { \global\cv@metrue@false }
+  }
+\ExplSyntaxOff
+
+%% ---- author-list name format (truncation never hides the self author) ----
+\newif\ifcv@trunc@
+\def\cv@lastk{0}\def\cv@total{0}
+\newcommand*\cv@namestr{%
+  \ifdefempty{\namepartgiveni}{}{\namepartgiveni\addnbspace}%
+  \ifdefempty{\namepartprefix}{}{\namepartprefix\addnbspace}%
+  \namepartfamily
+  \ifdefempty{\namepartsuffix}{}{\addcomma\space\namepartsuffix}}
+\newcommand*\cv@nameitem{\ifcv@metrue@{\bfseries\cv@namestr}\else\cv@namestr\fi}
+\def\cv@initstate#1{%
+  \xdef\cv@total{\number#1}\gdef\cv@lastk{0}%
+  \ifnum\cv@maxa>0 \ifnum#1>\cv@maxa \global\cv@trunc@true\else\global\cv@trunc@false\fi
+  \else\global\cv@trunc@false\fi}
+\newcommand*\cv@fullname{%
+  \cv@nameitem
+  \ifnumless{\value{listcount}}{\value{liststop}}{%
+    \ifboolexpr{test {\ifnumequal{\value{listcount}}{\numexpr\value{liststop}-1\relax}} and not test {\ifmorenames}}%
+      {\addspace and\space}{\addcomma\space}}{}%
+  \usebibmacro{name:andothers}}
+% truncated: first maxauthors names, then only the self author(s), then et al.
+\newcommand*\cv@truncname{%
+  \ifnum\value{listcount}>\cv@maxa\relax
+    \ifcv@metrue@
+      \ifnum\numexpr\value{listcount}-\cv@lastk\relax>1\relax
+        ,\space\ldots,\space
+      \else\addcomma\space\fi
+      \cv@nameitem
+      \xdef\cv@lastk{\the\value{listcount}}%
+    \fi
+  \else
+    \ifnum\value{listcount}>1\relax\addcomma\space\fi
+    \cv@nameitem
+    \xdef\cv@lastk{\the\value{listcount}}%
+  \fi
+  \ifnum\value{listcount}=\value{liststop}\relax
+    \ifboolexpr{test {\ifnumequal{\cv@lastk}{\value{liststop}}} and not test {\ifmorenames}}%
+      {}{,\space\ldots\space\textit{et~al.}}%
+  \fi}
+\DeclareNameFormat{cvauthor}{%
+  \ifnumequal{\value{listcount}}{1}{\cv@initstate{\value{liststop}}}{}%
+  \cv@ismeexp{\namepartprefix}{\namepartfamily}{\namepartgiven}%
+  \ifcv@trunc@\cv@truncname\else\cv@fullname\fi}
+\DeclareNameAlias{author}{cvauthor}
+\DeclareDelimFormat{andothersdelim}{\addcomma\space}
+
+%% ---- field formats --------------------------------------------------------
+\providecommand*\href[2]{#2}
+\urlstyle{same}
+\DeclareFieldFormat{doi}{\href{https://doi.org/#1}{doi:\nolinkurl{#1}}}
+\DeclareFieldFormat{eprint:arxiv}{\href{https://arxiv.org/abs/#1}{arXiv:\nolinkurl{#1}}}
+\DeclareFieldFormat{inspire}{\href{https://inspirehep.net/literature/#1}{INSPIRE:#1}}
+\DeclareFieldFormat{title}{#1}
+\DeclareFieldFormat{journaltitle}{#1}
+\DeclareFieldFormat{volume}{\textbf{#1}}
+\DeclareFieldFormat{pages}{#1}
+\DeclareFieldFormat{citations}{[#1 citations]}
+\renewbibmacro*{in:}{}
+
+\newcommand*\cv@sep{\addcomma\space}
+\newbibmacro*{cv:authors}{%
+  \ifnameundef{author}{}{%
+    \iffieldundef{collaboration}{%
+      \printnames{author}\ifcv@trunc@\space(\cv@total\space authors)\fi}{%
+      \printfield{collaboration}\space(\printnames{author}%
+      \iffieldundef{nauthors}{\ifcv@trunc@\addcomma\space\cv@total\space authors\fi}%
+        {\addcomma\space\printfield{nauthors}\space authors}%
+      )}}}
+\newbibmacro*{cv:venue}{%
+  \iffieldundef{journaltitle}{%
+    \iffieldundef{booktitle}{}{\printfield{booktitle}}}{\printfield{journaltitle}}%
+  \iffieldundef{volume}{}{\space\printfield{volume}}%
+  \iffieldundef{number}{}{\space\printfield{number}}%
+  \iffieldundef{pages}{}{\cv@sep\printfield{pages}}%
+  \iffieldundef{eid}{}{\cv@sep\printfield{eid}}%
+  \iffieldundef{eventtitle}{}{\space(\printfield{eventtitle})}%
+  \iffieldundef{year}{}{\space(\printfield{year})}}
+\newbibmacro*{cv:ids}{%
+  \setunit{\addperiod\space}%
+  \iffieldundef{doi}{}{\printfield{doi}\setunit{\addspace}}%
+  \iffieldundef{eprint}{}{%
+    \ifboolexpr{test {\iffieldequalstr{eprinttype}{arxiv}}}{\printfield[eprint:arxiv]{eprint}}{\printfield{eprint}}\setunit{\addspace}}%
+  \iffieldundef{inspire}{}{\printfield{inspire}\setunit{\addspace}}%
+  \iffieldundef{citations}{}{\printfield{citations}}\addperiod}
+\newbibmacro*{cv:role}{%
+  \ifdefstring{\cv@showrole}{true}{%
+    \iffieldundef{role}{}{\newline\hspace*{0pt}{\itshape Role: \printfield{role}}}}{}}
+
+\newbibmacro*{cv:numlabel}{%
+  \ifdefstring{\cv@numbered}{true}{\stepcounter{cv@pubn}\arabic{cv@pubn}.\space}{}}
+\newcounter{cv@pubn}
+
+\DeclareBibliographyDriver{article}{%
+  \usebibmacro{bibindex}\usebibmacro{begentry}%
+  \usebibmacro{cv:authors}\printunit{\addperiod\space}%
+  \printfield{title}\printunit{\addperiod\space}%
+  \usebibmacro{cv:venue}\usebibmacro{cv:ids}\usebibmacro{cv:role}\usebibmacro{finentry}}
+\DeclareBibliographyDriver{inproceedings}{%
+  \usebibmacro{bibindex}\usebibmacro{begentry}%
+  \usebibmacro{cv:authors}\printunit{\addperiod\space}%
+  \printfield{title}\printunit{\addperiod\space}%
+  \usebibmacro{cv:venue}\usebibmacro{cv:ids}\usebibmacro{cv:role}\usebibmacro{finentry}}
+\DeclareBibliographyDriver{unpublished}{%
+  \usebibmacro{bibindex}\usebibmacro{begentry}%
+  \usebibmacro{cv:authors}\printunit{\addperiod\space}%
+  \printfield{title}\printunit{\addperiod\space}%
+  \iffieldundef{howpublished}{}{\printfield{howpublished}}\iffieldundef{year}{}{\space(\printfield{year})}\usebibmacro{cv:ids}\usebibmacro{cv:role}\usebibmacro{finentry}}
+% talks: @misc with keywords=talk,(invited|contributed)
+\DeclareBibliographyDriver{misc}{%
+  \usebibmacro{bibindex}\usebibmacro{begentry}%
+  \usebibmacro{cv:authors}\printunit{\addperiod\space}%
+  \printfield{title}\printunit{\addperiod\space}%
+  \iffieldundef{eventtitle}{}{\printfield{eventtitle}}%
+  \iffieldundef{venue}{}{\cv@sep\printfield{venue}}%
+  \iffieldundef{year}{}{\cv@sep\mkbibdatelong{year}{month}{}}%
+  \ifkeyword{invited}{\space(invited talk)}{\ifkeyword{contributed}{\space(contributed talk)}{}}%
+  \printunit{.}%
+  \usebibmacro{finentry}}
+\DeclareBibliographyDriver{*}{\usebibmacro{begentry}\usebibmacro{cv:authors}\printunit{\addperiod\space}\printfield{title}\printunit{.}\usebibmacro{finentry}}
+
+\defbibenvironment{cvbibliography}
+  {\@beginparpenalty=\@M
+   \list{\usebibmacro{cv:numlabel}}{\clubpenalty=\@M \widowpenalty=\@M \brokenpenalty=\@M
+     \interlinepenalty=\@M \@itempenalty=0 \setlength{\labelwidth}{0pt}\setlength{\labelsep}{0pt}%
+     \setlength{\leftmargin}{\cvpubindent}\setlength{\itemindent}{0pt}%
+     \setlength{\itemsep}{\cv@itemsep}\setlength{\parsep}{0pt}\setlength{\topsep}{0pt}%
+     \setlength{\partopsep}{0pt}\setlength{\listparindent}{0pt}\setlength{\parindent}{0pt}\raggedright}}
+  {\endlist}
+  {\item}
+\newlength\cvpubindent \setlength\cvpubindent{0pt}
+\newlength\cv@itemsep \setlength\cv@itemsep{3pt}
+\newcommand*\cvpubitemsep[1]{\setlength\cv@itemsep{#1}}
+
+%% ---- limit check ----------------------------------------------------------
+\newcounter{cv@limcnt}
+\defbibcheck{cvlimit}{%
+  \ifnumequal{\cv@limit}{0}{}{%
+    \ifnumless{\value{cv@limcnt}}{\cv@limit}{\stepcounter{cv@limcnt}}{\skipentry}}}
+
+%% ---- counts read from the bib via \AtDataInput (single pass) ---------------
+\def\cv@tiers{led,collab,other,talk,invited,contributed}
+\def\cv@initcounts{\@for\cv@t:=\cv@tiers\do{\expandafter\gdef\csname cv@n@\cv@t\endcsname{0}}}
+\cv@initcounts
+\def\cv@inc#1{\expandafter\xdef\csname cv@n@#1\endcsname{\the\numexpr\csname cv@n@#1\endcsname+1\relax}}
+\AtDataInput{%
+  \ifkeyword{led}{\cv@inc{led}}{}%
+  \ifkeyword{collab}{\cv@inc{collab}}{}%
+  \ifkeyword{other}{\cv@inc{other}}{}%
+  \ifkeyword{talk}{\cv@inc{talk}}{}%
+  \ifkeyword{invited}{\cv@inc{invited}}{}%
+  \ifkeyword{contributed}{\cv@inc{contributed}}{}}
+\newcommand*\cvpubcount[1]{%
+  \ifstrequal{#1}{all}{\the\numexpr\cv@n@led+\cv@n@collab+\cv@n@other\relax}{%
+  \ifstrequal{#1}{talks}{\cv@n@talk}{\csname cv@n@#1\endcsname}}}
+\newcommand*\cvpubtotal{\cvpubcount{all}}
+\newcommand*\cvtalkcount[1][all]{\ifstrequal{#1}{all}{\cv@n@talk}{\csname cv@n@#1\endcsname}}
+\newcommand*\cvhindex[1]{#1}
+\providecommand*\BiblatexSplitbibDefernumbersWarningOff{}
+\BiblatexSplitbibDefernumbersWarningOff
+\AtBeginDocument{\nocite{*}}
+
+%% ---- user commands ---------------------------------------------------------
+\newcommand*\cvprintpubs[1][]{%
+  \begingroup
+  \def\cv@tier{all}\def\cv@limit{0}\def\cv@sorting{ydnt}%
+  \setkeys{cvpubs}{#1}%
+  \setcounter{cv@limcnt}{0}\setcounter{cv@pubn}{0}%
+  \newrefcontext[sorting=\cv@sorting]%
+  \ifstrequal{\cv@tier}{all}{%
+    \printbibliography[heading=none,notkeyword=talk,check=cvlimit,env=cvbibliography]}{%
+    \edef\cv@kw{\cv@tier}%
+    \edef\cv@opts{heading=none,keyword=\cv@kw,check=cvlimit,env=cvbibliography}\expandafter\printbibliography\expandafter[\cv@opts]}%
+  \endgroup}
+\newcommand*\cvprinttalks[1][]{%
+  \begingroup
+  \def\cv@kind{all}\def\cv@limit{0}\def\cv@sorting{ydnt}%
+  \setkeys{cvpubs}{#1}%
+  \setcounter{cv@limcnt}{0}\setcounter{cv@pubn}{0}%
+  \ifstrequal{\cv@kind}{all}{\def\cv@kw{talk}}{\def\cv@kw{\cv@kind}}%
+  \newrefcontext[sorting=\cv@sorting]%
+  \edef\cv@opts{heading=none,keyword=\cv@kw,check=cvlimit,env=cvbibliography}\expandafter\printbibliography\expandafter[\cv@opts]%
+  \endgroup}
+\endinput

@@ -1,0 +1,272 @@
+%% hepcv-core.sty : metadata, header, sections, entries, key-value tags, variant filtering.
+%% Part of hepcv2 (MIT licence). Linear, ATS-safe output: no tables, no icons, no text boxes.
+\RequirePackage{expl3}
+\ProvidesExplPackage{hepcv-core}{2026/11/25}{2.0}{hepcv core: header, sections, entries, variants}
+\RequirePackage{xparse,xcolor,enumitem,fancyhdr,lastpage,needspace,accsupp}
+\RequirePackage{microtype}
+
+%% ---------------------------------------------------------------- state
+\tl_if_exist:NF \g_hepcv_variant_tl { \tl_new:N \g_hepcv_variant_tl \tl_gset:Nn \g_hepcv_variant_tl { postdoc } }
+\tl_if_exist:NF \g_hepcv_theme_tl   { \tl_new:N \g_hepcv_theme_tl   \tl_gset:Nn \g_hepcv_theme_tl   { navy } }
+\int_if_exist:NF \g_hepcv_pagebudget_int { \int_new:N \g_hepcv_pagebudget_int \int_gset:Nn \g_hepcv_pagebudget_int { 0 } }
+\tl_new:N \g_hepcv_name_tl
+\tl_new:N \hepcv@name
+\tl_new:N \hepcv@role
+\tl_new:N \hepcv@variant
+\tl_gset_eq:NN \hepcv@variant \g_hepcv_variant_tl
+\tl_new:N \g_hepcv_role_tl
+\tl_new:N \g_hepcv_contact_tl
+\tl_new:N \g_hepcv_keywords_tl
+\tl_new:N \g_hepcv_updated_tl
+\tl_gset:Nn \g_hepcv_updated_tl { \today }
+\int_new:N \g_hepcv_sec_int
+\bool_new:N \l_hepcv_first_bool
+\bool_new:N \g_hepcv_compact_bool
+\clist_new:N \l__hepcv_tags_clist
+\tl_new:N \l_hepcv_kw_tl   % display keywords of the current entry (key keywords=, used by the classic theme)
+
+%% colours (themes override)
+\definecolor{cvaccent}{HTML}{0B2A5B}
+\definecolor{cvgrey}{HTML}{4A4A4A}
+\definecolor{cvrule}{HTML}{9AA3B5}
+\definecolor{cvband}{HTML}{EEF1F7}
+
+%% density: ONE set of values for every variant (rhythm is identical; variants differ only in content).
+\dim_new:N \l_hepcv_secbefore_dim
+\dim_new:N \l_hepcv_secafter_dim
+\dim_new:N \l_hepcv_entrysep_dim
+\dim_new:N \l_hepcv_itemsep_dim
+\dim_new:N \l_hepcv_labelw_dim
+\dim_new:N \l_hepcv_skillw_dim
+\dim_new:N \l_hepcv_linesep_dim
+\bool_new:N \g_hepcv_fresh_bool   % true right after a heading: the next entry or row takes no gap
+\bool_new:N \g_hepcv_justfirst_bool   % true while the only element since a section heading is its first entry or row
+\dim_set:Nn \l_hepcv_secbefore_dim { 14pt } \dim_set:Nn \l_hepcv_secafter_dim { 7pt } \dim_set:Nn \l_hepcv_linesep_dim { 2pt }
+\dim_set:Nn \l_hepcv_entrysep_dim { 6pt }   \dim_set:Nn \l_hepcv_itemsep_dim { 1.5pt }
+\str_if_eq:VnT \g_hepcv_variant_tl { oneside } { \bool_gset_true:N \g_hepcv_compact_bool }
+\str_if_eq:VnT \g_hepcv_variant_tl { industry } { \bool_gset_true:N \g_hepcv_compact_bool }
+\dim_set:Nn \l_hepcv_labelw_dim { 24mm }
+\dim_set:Nn \l_hepcv_skillw_dim { 40mm }
+\tl_set:Nx \l_tmpa_tl { itemsep = \dim_use:N \l_hepcv_itemsep_dim , topsep = 2pt , parsep = 0pt , partopsep = 0pt , leftmargin = 1.1em , labelsep = 0.5em }
+\cs_new_protected:Npn \hepcv_setlist:n #1 { \setlist[itemize]{#1} \setlist[cvlist]{#1} }
+\newlist{cvlist}{itemize}{2}
+\exp_args:NV \hepcv_setlist:n \l_tmpa_tl
+\setlist[cvlist,1]{label = \textbullet}
+\setlist[cvlist,2]{label = \textendash}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\emergencystretch}{2em}
+%% page-break policy: never a widow or club line, no hyphen at a page break, ragged bottom (no stretched gaps,
+%% so vertical rhythm is identical on every page); headings and entries are chained with \nobreak below.
+\clubpenalty=10000 \widowpenalty=10000 \displaywidowpenalty=10000 \brokenpenalty=10000
+\raggedbottom
+\hyphenpenalty=300 \exhyphenpenalty=300
+\vbadness=10000 \hbadness=3000
+\@beginparpenalty=10000 \@itempenalty=0 \@endparpenalty=-50
+
+%% \hepcv_needspace:n: start a new page unless #1 of vertical space remains.  Unlike the needspace package it adds no
+%% artificial stretch, so TeX's choice of page break (and the ragged-bottom fill) is not distorted.
+\cs_new_protected:Npn \hepcv_needspace:n #1
+  { \par \bool_if:nT { \dim_compare_p:n { \pagegoal < \c_max_dim } && \dim_compare_p:n { \pagegoal - \pagetotal < #1 } && \dim_compare_p:n { \pagegoal - \pagetotal > 0pt } } { \penalty -10000 } }
+
+%% ---------------------------------------------------------------- tag filtering
+\keys_define:nn { hepcv/tags }
+  {
+    tags .code:n = \clist_put_right:Nn \l__hepcv_tags_clist {#1} ,
+    keywords .tl_set:N = \l_hepcv_kw_tl ,
+    unknown .code:n = \clist_put_right:NV \l__hepcv_tags_clist \l_keys_key_str
+  }
+\bool_new:N \l__hepcv_found_bool
+\prg_new_protected_conditional:Npnn \hepcv_variant_in:N #1 { T , F , TF }
+  {
+    \bool_set_false:N \l__hepcv_found_bool
+    \clist_map_inline:Nn #1
+      { \str_if_eq:nVT {##1} \g_hepcv_variant_tl { \bool_set_true:N \l__hepcv_found_bool \clist_map_break: } }
+    \bool_if:NTF \l__hepcv_found_bool { \prg_return_true: } { \prg_return_false: }
+  }
+\cs_new_protected:Npn \hepcv_opt_show:nn #1#2
+  {
+    \clist_clear:N \l__hepcv_tags_clist
+    \tl_clear:N \l_hepcv_kw_tl
+    \keys_set:nn { hepcv/tags } {#1}
+    \clist_if_empty:NTF \l__hepcv_tags_clist {#2}
+      { \hepcv_variant_in:NT \l__hepcv_tags_clist {#2} }
+  }
+\clist_new:N \l__hepcv_tmp_clist
+\NewDocumentCommand \cvonly { m m }
+  { \clist_set:Nn \l__hepcv_tmp_clist {#1} \hepcv_variant_in:NT \l__hepcv_tmp_clist {#2} }
+\NewDocumentCommand \cvnot { m m }
+  { \clist_set:Nn \l__hepcv_tmp_clist {#1} \hepcv_variant_in:NF \l__hepcv_tmp_clist {#2} }
+\NewDocumentCommand \cvfull  { m } { \cvonly { postdoc , long } {#1} }
+\NewDocumentCommand \cvshort { m } { \cvnot  { postdoc , long } {#1} }
+
+%% ---------------------------------------------------------------- metadata
+\NewDocumentCommand \cvname    { m } { \tl_gset:Nn \g_hepcv_name_tl {#1} \tl_gset:Nn \hepcv@name {#1} }
+\NewDocumentCommand \cvrole    { m } { \tl_gset:Nn \g_hepcv_role_tl {#1} \tl_gset:Nn \hepcv@role {#1} }
+\NewDocumentCommand \cvcontact { m } { \tl_gset:Nn \g_hepcv_contact_tl {#1} }
+\NewDocumentCommand \cvkeywords { m } { \tl_gset:Nn \g_hepcv_keywords_tl {#1} }
+\NewDocumentCommand \cvupdated { m } { \tl_gset:Nn \g_hepcv_updated_tl {#1} }
+%% \cvlink{url}{text}: live link; when the text is plain characters (no commands) it may break after @ . / - _
+\bool_new:N \l__hepcv_plain_bool
+\tl_new:N \l__hepcv_brk_tl
+\cs_new_protected:Npn \hepcv_breakable:n #1
+  {
+    \bool_set_true:N \l__hepcv_plain_bool
+    \tl_map_inline:nn {#1}
+      { \bool_if:NT \l__hepcv_plain_bool { \bool_if:nT { \token_if_cs_p:N ##1 || \token_if_eq_catcode_p:NN ##1 \c_group_begin_token || \token_if_eq_catcode_p:NN ##1 \c_group_end_token || \token_if_eq_catcode_p:NN ##1 \c_math_toggle_token } { \bool_set_false:N \l__hepcv_plain_bool } } }
+    \bool_if:NTF \l__hepcv_plain_bool
+      {
+        \tl_set:Nn \l__hepcv_brk_tl {#1}
+        \tl_map_inline:Nn \l__hepcv_brk_tl
+          { ##1 \tl_if_in:nnT { @ / } {##1} { \penalty 0 \scan_stop: } \tl_if_in:nnT { . - _ } {##1} { \penalty 150 \scan_stop: } }
+      }
+      {#1}
+  }
+\NewDocumentCommand \cvlink { m m }
+  { \cs_if_exist:NTF \href { \href {#1} { \hepcv_breakable:n {#2} } } { \hepcv_breakable:n {#2} } }
+\NewDocumentCommand \cvmetric { m m } { \textbf { \textcolor{cvaccent}{#1} } \tl_if_blank:nF {#2} { \nobreakspace #2 } }
+\tl_new:N \g_hepcv_present_tl
+\tl_gset:Nn \g_hepcv_present_tl { present }
+\NewDocumentCommand \cvdaterange { m m }
+  { #1 -- \tl_if_blank:nTF {#2} { \tl_use:N \g_hepcv_present_tl } {#2} }
+
+%% contact items: \cvitem{label}{value}; layout supplied by the theme
+\cs_new_protected:Npn \hepcv_contact_sep:
+  { \penalty0 \hspace{0.45em} \textcolor{cvgrey}{\textbar} \hspace{0.45em} }
+\cs_new_protected:Npn \hepcv_contact_item:nn #1#2
+  {
+    \bool_if:NTF \l_hepcv_first_bool { \bool_set_false:N \l_hepcv_first_bool } { \hepcv_contact_sep: }
+    \tl_if_blank:nF {#1} { \textcolor{cvgrey}{#1:} \nobreakspace }
+    #2
+  }
+\NewDocumentCommand \cvitem { m m } { \hepcv_contact_item:nn {#1} {#2} }
+
+%% ---------------------------------------------------------------- header (theme hooks)
+\cs_new_protected:Npn \hepcv_theme_header: {}
+\cs_new_protected:Npn \hepcv_theme_section:n #1 {}
+\cs_new_protected:Npn \hepcv_theme_subsection:n #1 {}
+\NewDocumentCommand \makecvheader { }
+  {
+    \cs_if_exist:NT \hepcvSetPDFMeta
+      { \hepcvSetPDFMeta { \tl_use:N \g_hepcv_name_tl ,~Curriculum~Vitae } { \tl_use:N \g_hepcv_name_tl }
+          { \tl_use:N \g_hepcv_role_tl } { \tl_use:N \g_hepcv_keywords_tl } }
+    \bool_set_true:N \l_hepcv_first_bool
+    \hepcv_theme_header:
+  }
+\NewDocumentCommand \cvsection { m }
+  {
+    \tl_if_blank:nF {#1}
+      {
+        \int_gincr:N \g_hepcv_sec_int
+        \par \hepcv_needspace:n { 7 \baselineskip }
+        \cs_if_exist:NT \pdfbookmark { \pdfbookmark [1] {#1} { cvsec \int_use:N \g_hepcv_sec_int } }
+        \hepcv_theme_section:n {#1}
+        \bool_gset_true:N \g_hepcv_fresh_bool \bool_gset_false:N \g_hepcv_justfirst_bool
+      }
+  }
+\NewDocumentCommand \cvsubsection { m }
+  {
+    \tl_if_blank:nF {#1}
+      {
+        %% a subsection straight after a section's first row (a summary line) stays on the section's page
+        \par \bool_if:NTF \g_hepcv_justfirst_bool { \nobreak } { \hepcv_needspace:n { 4 \baselineskip } }
+        \hepcv_theme_subsection:n {#1}
+        \bool_gset_true:N \g_hepcv_fresh_bool \bool_gset_false:N \g_hepcv_justfirst_bool
+      }
+  }
+
+%% ---------------------------------------------------------------- entries
+\cs_new_protected:Npn \hepcv_gap:n #1
+  {
+    \bool_if:NTF \g_hepcv_fresh_bool
+      { \bool_gset_false:N \g_hepcv_fresh_bool \bool_gset_true:N \g_hepcv_justfirst_bool }
+      { \bool_gset_false:N \g_hepcv_justfirst_bool \skip_vertical:n {#1} }
+  }
+%% ActualText wrapper: the line is extracted as "title, date" (adjacent), whatever the visual layout
+\tl_new:N \l__hepcv_act_tl
+\cs_new_protected:Npn \hepcv_actual:nn #1#2
+  { \BeginAccSupp { method = pdfstringdef , ActualText = {#1} } #2 \EndAccSupp { } }
+\cs_new_protected:Npn \hepcv_actualx:nn #1#2
+  { \tl_set:Nx \l__hepcv_act_tl {#1} \exp_args:NV \hepcv_actual:nn \l__hepcv_act_tl {#2} }
+\cs_new_protected:Npn \hepcv_entry:nnnnn #1#2#3#4#5
+  {
+    \bool_lazy_all:nF { { \tl_if_blank_p:n {#1} } { \tl_if_blank_p:n {#2} } { \tl_if_blank_p:n {#3} } { \tl_if_blank_p:n {#4} } { \tl_if_blank_p:n {#5} } }
+      {
+        \par \hepcv_needspace:n { 4 \baselineskip } \hepcv_gap:n { \l_hepcv_entrysep_dim }
+        \begingroup \raggedright \noindent
+        \bool_if:NTF \g_hepcv_compact_bool
+          {
+            \hepcv_actualx:nn { \exp_not:n {#1} \tl_if_blank:nF {#2} { ,~ \exp_not:n {#2} } \tl_if_blank:nF {#4} { ,~ \exp_not:n {#4} } \tl_if_blank:nF {#3} { ,~ \exp_not:n {#3} } }
+              {
+                \textbf{#1} \tl_if_blank:nF {#2} { ,~#2 } \tl_if_blank:nF {#4} { ,~\textit{#4} }
+                \tl_if_blank:nF {#3} { \nobreak \hspace{1em} \hfill \mbox{#3} }
+              }
+            \par
+          }
+          {
+            \bool_lazy_and:nnTF { \tl_if_blank_p:n {#1} } { \tl_if_blank_p:n {#3} }
+              { \prg_do_nothing: }
+              {
+                \hepcv_actualx:nn { \exp_not:n {#1} \tl_if_blank:nF {#3} { ,~ \exp_not:n {#3} } }
+                  { \textbf{#1} \tl_if_blank:nF {#3} { \nobreak \hspace{1em} \hfill \mbox{#3} } } \par \nobreak
+              }
+            \tl_if_blank:nTF {#2}
+              { \tl_if_blank:nF {#4} { \noindent \textit{\textcolor{cvgrey}{#4}} \par } }
+              {
+                \noindent
+                \hepcv_actualx:nn { \exp_not:n {#2} \tl_if_blank:nF {#4} { ,~ \exp_not:n {#4} } }
+                  { \textcolor{cvgrey}{#2} \tl_if_blank:nF {#4} { \nobreak \hspace{1em} \hfill \textit{\textcolor{cvgrey}{#4}} } }
+                \par
+              }
+          }
+        \endgroup
+        \tl_if_blank:nF {#5} { \nobreak #5 \par }
+      }
+  }
+\NewDocumentCommand \cventry { O{} m m m m +m }
+  { \hepcv_opt_show:nn {#1} { \hepcv_entry:nnnnn {#2} {#3} {#4} {#5} {#6} } }
+
+%% label/body row: label column of fixed width (labels wider than the column wrap), body hangs beside it
+\box_new:N \l__hepcv_lab_box
+\box_new:N \l__hepcv_body_box
+\dim_new:N \l__hepcv_labw_dim
+\cs_new_protected:Npn \hepcv_line:nnn #1#2#3
+  {
+    \par \hepcv_gap:n { \l_hepcv_linesep_dim } \noindent
+    \dim_set:Nn \l__hepcv_labw_dim {#1}
+    \hbox_to_wd:nn { \linewidth }
+      {
+        \parbox [ t ] { \l__hepcv_labw_dim } { \raggedright \strut \textbf{#2} }
+        \parbox [ t ] { \dim_eval:n { \linewidth - \l__hepcv_labw_dim } } { \raggedright \strut #3 \strut }
+      }
+    \par
+  }
+\NewDocumentCommand \cvline { O{} m m }
+  { \hepcv_opt_show:nn {#1} { \hepcv_line:nnn { \l_hepcv_labelw_dim } {#2} {#3} } }
+\NewDocumentCommand \cvskills { O{} m m }
+  { \hepcv_opt_show:nn {#1} { \hepcv_line:nnn { \l_hepcv_skillw_dim } {#2} {#3} } }
+\NewDocumentCommand \cvbullets { +m }
+  { \begin{cvlist} #1 \end{cvlist} }
+\NewDocumentCommand \cvlabelwidth { m } { \dim_set:Nn \l_hepcv_labelw_dim {#1} }
+
+%% ---------------------------------------------------------------- footer and page budget
+\fancypagestyle{hepcv}
+  {
+    \fancyhf{}
+    \renewcommand{\headrulewidth}{0pt}
+    \renewcommand{\footrulewidth}{0pt}
+    \fancyfoot[L]{\footnotesize\color{cvgrey} \tl_use:N \g_hepcv_name_tl ,~curriculum~vitae,~updated~\tl_use:N \g_hepcv_updated_tl }
+    \fancyfoot[R]{\footnotesize\color{cvgrey} Page~{\thepage}~of~\pageref{LastPage} }
+  }
+\AtBeginDocument { \pagestyle{hepcv} }
+\msg_new:nnn { hepcv } { pagebudget }
+  { The~CV~has~#1~pages,~over~the~budget~of~#2~for~variant~'#3'.~Shorten~content~or~raise~pagebudget. }
+\hook_gput_code:nnn { enddocument/afterlastpage } { hepcv }
+  {
+    \bool_if:nT { \int_compare_p:n { \g_hepcv_pagebudget_int > 0 } && \int_compare_p:n { \value{page} - 1 > \g_hepcv_pagebudget_int } }
+      {
+        \msg_warning:nnxxx { hepcv } { pagebudget }
+          { \int_eval:n { \value{page} - 1 } } { \int_use:N \g_hepcv_pagebudget_int } { \tl_use:N \g_hepcv_variant_tl }
+      }
+  }

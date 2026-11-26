@@ -1,0 +1,45 @@
+%% Author: Abhishek Bohare. MIT licence.
+%% Classic CV template. Build: latexmk main.tex   (LuaLaTeX + biber; on Overleaf set Compiler to LuaLaTeX)
+%% Set ats=true for a plain linear layout (no icons, photo or tag graphics) when uploading to an applicant-tracking system.
+\documentclass[variant=postdoc,pagebudget=3,icons=true,photo=photo.jpg,photosize=27mm]{hepcv}
+\cvpubsource{refs.bib}\cvmyname{Example, A.}{A. Example}
+\cvname{Alex Example}
+\cvrole{Experimental Particle Physicist \textbar{} University of Example}
+\cvcontact{%
+  \cvitem{Web}{\cvlink{https://example.org/alex}{example.org/alex}}
+  \cvitem{Email}{\cvlink{mailto:alex.example@university.ac.uk}{alex.example@university.ac.uk}}
+  \cvitem{Phone}{+00 0000 000000}
+  \cvitem{Location}{City, Country}
+  \cvitem{ORCID}{\cvlink{https://orcid.org/0000-0000-0000-0000}{0000-0000-0000-0000}}
+  \cvitem{INSPIRE}{\cvlink{https://inspirehep.net/authors/0000000}{inspirehep.net/authors/0000000}}
+  \cvitem{GitHub}{\cvlink{https://github.com/example}{github.com/example}}}
+\cvkeywords{particle physics, detector R\&D, machine learning}
+\cvupdated{\today}
+\begin{document}
+\makecvheader
+
+\cvsection{Profile}
+Experimental particle physicist with four years in the [Collaboration], leading [flagship analysis] and contributing to [detector or trigger system]. Seeking a postdoctoral position to [specific aim].
+
+\cvsection{Education}
+\cventry[keywords={Particle physics,Statistics,Test beam}]{PhD, Physics}{University of Example}{2022--2026}{City, Country}{%
+ \cvbullets{
+  \item Thesis: \textit{Title of the thesis}. Supervisor: A.~Supervisor.
+  \item Measured [quantity] with \cvmetric{[x]\%}{precision}.
+ }}
+\cventry[keywords={Mathematics,Physics}]{BSc, Physics}{Example Institute of Technology}{2016--2019}{City, Country}{First-class honours.}
+
+\cvsection{Experience}
+\cventry[keywords={Python,C++,ROOT}]{Research Student}{[Collaboration], University of Example}{\cvdaterange{2022}{}}{City, Country}{%
+ \cvbullets{
+  \item Led [analysis]: measured [quantity] to \cvmetric{[x]\%}{precision}.
+  \item Built [software component] now used by \cvmetric{[n]}{analysts}.
+ }}
+
+\cvsection{Technical Skills}
+\cvskills{Languages}{\textbf{Python}, \textbf{C++}, ROOT, Bash}
+\cvskills{Statistics}{Maximum-likelihood fits, Bayesian inference}
+
+\cvsection{Publications}
+\cvprintpubs[tier=led]
+\end{document}

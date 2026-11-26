@@ -1,0 +1,45 @@
+%% hepcv-fonts-classic.sty : fontspec loader for the 'classic' theme (LuaLaTeX or XeLaTeX only).
+%% Loads the Source Sans Pro OpenType files bundled in hepcv2/fonts/ (SIL OFL 1.1, see fonts/OFL.txt)
+%% through fontspec Path=, so no system fonts and no Overleaf font upload are needed.
+%% Weights: Light = body, Semibold = \textbf (strong contrast), Regular = \cvmedium (emphasis).
+%% MIT licence (code); fonts under the OFL.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{hepcv-fonts-classic}[2026/11/25 v1.0 hepcv2 classic font loader]
+\RequirePackage{iftex}
+\ifPDFTeX
+  \PackageError{hepcv-fonts-classic}{fontspec needs LuaLaTeX or XeLaTeX}
+    {Compile with lualatex or xelatex (Overleaf: Menu > Compiler), or choose theme=navy, mono or sidebar.}
+  \expandafter\endinput
+\fi
+\RequirePackage{fontspec}
+\defaultfontfeatures{Ligatures=TeX}
+%% Locate the bundled fonts: flat project (fonts/), examples/ build (../fonts/), or TEXINPUTS.
+\newcommand*\hepcv@fontpath{}
+\IfFileExists{fonts/SourceSansPro-Light.otf}{\renewcommand*\hepcv@fontpath{fonts/}}{%
+  \IfFileExists{../fonts/SourceSansPro-Light.otf}{\renewcommand*\hepcv@fontpath{../fonts/}}{%
+    \IfFileExists{SourceSansPro-Light.otf}{\renewcommand*\hepcv@fontpath{./}}{%
+      \PackageError{hepcv-fonts-classic}{Bundled fonts not found}{Copy the hepcv2 fonts/ directory next to your .tex file (or its parent directory).}}}}
+\setmainfont{SourceSansPro-Light.otf}[
+  Path = \hepcv@fontpath ,
+  UprightFont    = SourceSansPro-Light.otf ,
+  ItalicFont     = SourceSansPro-LightIt.otf ,
+  BoldFont       = SourceSansPro-Semibold.otf ,
+  BoldItalicFont = SourceSansPro-SemiboldIt.otf ,
+  Scale = 1.0625 ]
+\setsansfont{SourceSansPro-Light.otf}[
+  Path = \hepcv@fontpath ,
+  ItalicFont     = SourceSansPro-LightIt.otf ,
+  BoldFont       = SourceSansPro-Semibold.otf ,
+  BoldItalicFont = SourceSansPro-SemiboldIt.otf ,
+  Scale = 1.0625 ]
+\renewcommand*\familydefault{\rmdefault}
+%% Regular weight as the intermediate (emphasis) weight.
+\newfontfamily\hepcv@mediumfont{SourceSansPro-Regular.otf}[
+  Path = \hepcv@fontpath ,
+  ItalicFont = SourceSansPro-It.otf ,
+  BoldFont = SourceSansPro-Semibold.otf ,
+  BoldItalicFont = SourceSansPro-SemiboldIt.otf ,
+  Scale = 1.0625 ]
+\DeclareRobustCommand*\cvmedium{\hepcv@mediumfont}
+\DeclareTextFontCommand{\textmedium}{\cvmedium}
+\endinput

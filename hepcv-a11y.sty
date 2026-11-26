@@ -1,0 +1,84 @@
+%% hepcv-a11y.sty -- PDF metadata, text-extraction hygiene, optional tagging.
+%% Part of hepcv2 (MIT licence).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{hepcv-a11y}[2026/11/25 v0.1 hepcv2 accessibility and ATS helpers]
+
+\RequirePackage{iftex}
+\RequirePackage{xkeyval}
+
+% Options: pdftitle, pdfauthor, pdfsubject, pdfkeywords, lang, colorlinks=true|false, tagging=auto|off
+\def\hepcv@ay@title{}\def\hepcv@ay@author{}\def\hepcv@ay@subject{}
+\def\hepcv@ay@keywords{}\def\hepcv@ay@lang{en-GB}\def\hepcv@ay@links{true}
+\define@key{hepcvay}{pdftitle}{\def\hepcv@ay@title{#1}}
+\define@key{hepcvay}{pdfauthor}{\def\hepcv@ay@author{#1}}
+\define@key{hepcvay}{pdfsubject}{\def\hepcv@ay@subject{#1}}
+\define@key{hepcvay}{pdfkeywords}{\def\hepcv@ay@keywords{#1}}
+\define@key{hepcvay}{lang}{\def\hepcv@ay@lang{#1}}
+\define@key{hepcvay}{colorlinks}{\def\hepcv@ay@links{#1}}
+\define@key{hepcvay}{tagging}{}
+\ProcessOptionsX<hepcvay>
+
+% Glyph-to-Unicode maps so ligatures (fi, ffl) and accents extract as text.
+\ifPDFTeX
+  \input{glyphtounicode}
+  \pdfgentounicode=1
+\fi
+\ifLuaTeX
+  % LuaTeX/XeTeX with OpenType fonts produce ToUnicode maps natively.
+\fi
+
+% Metadata setter. Call (after \hypersetup is possible) with title/author;
+% hepcv-core calls \hepcvSetPDFMeta{title}{author}{subject}{keywords}.
+\newcommand*\hepcv@ay@setup{%
+  \hypersetup{%
+    pdftitle={\hepcv@ay@title},%
+    pdfauthor={\hepcv@ay@author},%
+    pdfsubject={\hepcv@ay@subject},%
+    pdfkeywords={\hepcv@ay@keywords},%
+    pdfcreator={hepcv2 (LaTeX)},%
+    unicode=true%
+  }%
+}
+\newcommand*\hepcvSetPDFMeta[4]{%
+  \def\hepcv@ay@title{#1}\def\hepcv@ay@author{#2}%
+  \def\hepcv@ay@subject{#3}\def\hepcv@ay@keywords{#4}%
+  \hypersetup{pdftitle={#1},pdfauthor={#2},pdfsubject={#3},pdfkeywords={#4}}%
+}
+
+% hyperref: load once, plain-text links (no boxes), bookmarks off for a 1-2 page CV.
+\@ifpackageloaded{hyperref}{}{%
+  \RequirePackage[hidelinks,unicode,bookmarks=false,breaklinks,%
+     pdfdisplaydoctitle=true,pdflang={\hepcv@ay@lang}]{hyperref}}
+\hepcv@ay@setup
+\AtBeginDocument{%
+  \hepcv@ay@setup
+  \@ifpackageloaded{hyperxmp}{}{\IfFileExists{hyperxmp.sty}{}{}}%
+  % robust PDF strings: dates, metrics and tags used inside ActualText / bookmarks keep their text
+  \pdfstringdefDisableCommands{%
+    \def\cvdaterange#1#2{#1--\if\relax\detokenize{#2}\relax present\else #2\fi}%
+    \def\cvmetric#1#2{#1 #2}%
+    \let\cvtag\@firstofone
+    \def\cvlink#1#2{#2}}%
+}
+
+% Optional XMP metadata via hyperxmp when present (must load before hyperref in
+% some setups; we only report availability here to stay robust).
+\newif\ifhepcv@ay@tagged
+\expandafter\ifx\csname tag_stop:\endcsname\relax\else
+  \hepcv@ay@taggedtrue% tagging code present (activated by \DocumentMetadata)
+\fi
+
+% Tagging note: \DocumentMetadata must precede \documentclass, so it cannot be
+% issued from a package. Users who want a tagged PDF write, as the first line
+% of the .tex file (TeX Live 2025 or newer):
+%   \DocumentMetadata{lang=en-GB,pdfstandard=ua-2,pdfversion=2.0,testphase={phase-III,firstaid}}
+% (works with the navy, mono and classic ats=true builds; the sidebar theme and the classic row layout use boxes
+% that tagpdf cannot follow, so leave tagging off there)
+% hepcv-a11y then detects the active tagging code and does nothing further.
+\newcommand*\hepcvIfTagging[2]{%
+  \ifhepcv@ay@tagged #1\else #2\fi}
+
+% Hide purely decorative material from text extraction.
+\newcommand*\hepcvArtifact[1]{#1}
+
+\endinput
